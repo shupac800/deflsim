@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRT Deflection Yoke Simulator</title>
+<style>
+  :root {
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid-line: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --series-1: #2a78d6;      /* electron beam */
+    --series-2: #1baf7a;      /* coil windings */
+    --div-mid: #f0efec;       /* diverging midpoint */
+    --div-blue: #0d366b;      /* diverging pole, -Bx */
+    --div-red: #8f1d1c;       /* diverging pole, +Bx */
+    --tooltip-bg: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --grid-line: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5;
+      --series-2: #199e70;
+      --div-mid: #383835;
+      --div-blue: #86b6ef;
+      --div-red: #ef8a89;
+      --tooltip-bg: #242423;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--page);
+    color: var(--text-primary);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header { padding: 18px 22px 6px; }
+  header h1 { font-size: 19px; font-weight: 650; margin: 0; }
+  header p { margin: 3px 0 0; color: var(--text-secondary); font-size: 13px; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 292px 1fr;
+    gap: 14px;
+    padding: 12px 22px 26px;
+    align-items: start;
+  }
+  @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .card h2 {
+    font-size: 12px; font-weight: 600; letter-spacing: .02em;
+    color: var(--text-secondary); margin: 0 0 10px;
+  }
+
+  /* controls */
+  .controls .group { margin-bottom: 14px; }
+  .controls .group > .gtitle {
+    font-size: 11px; font-weight: 650; letter-spacing: .05em;
+    text-transform: uppercase; color: var(--text-muted); margin: 12px 0 6px;
+  }
+  .ctl { margin: 8px 0; }
+  .ctl label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 12.5px; color: var(--text-secondary); margin-bottom: 2px;
+  }
+  .ctl label output {
+    color: var(--text-primary); font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .ctl input[type=range] { width: 100%; accent-color: var(--series-1); margin: 0; }
+  .amp-turns {
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--grid-line);
+    font-size: 12.5px; color: var(--text-secondary);
+  }
+  .amp-turns b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  button.reset {
+    margin-top: 10px; width: 100%; padding: 6px 0; font: inherit; font-size: 12.5px;
+    color: var(--text-secondary); background: none;
+    border: 1px solid var(--border); border-radius: 7px; cursor: pointer;
+  }
+  button.reset:hover { color: var(--text-primary); border-color: var(--baseline); }
+
+  /* right column */
+  .content { display: grid; gap: 14px; }
+  .tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  @media (max-width: 1280px) { .tiles { grid-template-columns: repeat(3, 1fr); } }
+  .tile .tlabel { font-size: 12px; color: var(--text-secondary); }
+  .tile .tvalue { font-size: 24px; font-weight: 600; margin-top: 2px; }
+  .tile .tsub { font-size: 11.5px; color: var(--text-muted); margin-top: 1px; }
+
+  .duo { display: grid; grid-template-columns: 5fr 4fr; gap: 14px; }
+  @media (max-width: 1280px) { .duo { grid-template-columns: 1fr; } }
+
+  .canvas-wrap { position: relative; }
+  canvas { display: block; width: 100%; }
+  #side-canvas { height: 340px; cursor: crosshair; }
+  #geo-canvas { height: 330px; cursor: grab; touch-action: none; }
+  #geo-canvas.dragging { cursor: grabbing; }
+  #chart-canvas { height: 296px; cursor: crosshair; }
+
+  .legend {
+    display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+    margin-top: 8px; font-size: 12px; color: var(--text-secondary);
+  }
+  .legend .key { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .swatch-line { width: 14px; height: 0; border-top: 2.5px solid; border-radius: 2px; }
+
+  .tooltip {
+    position: absolute; pointer-events: none; display: none; z-index: 5;
+    background: var(--tooltip-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px; font-size: 12px;
+    box-shadow: 0 3px 14px rgba(0,0,0,.14); white-space: nowrap;
+  }
+  .tooltip .tt-val { font-weight: 650; font-size: 13px; color: var(--text-primary); }
+  .tooltip .tt-row { color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+  .tooltip .tt-key { width: 12px; border-top: 2.5px solid var(--series-1); border-radius: 2px; }
+
+  details.table-view { margin-top: 8px; }
+  details.table-view summary {
+    font-size: 12px; color: var(--text-muted); cursor: pointer; user-select: none;
+  }
+  details.table-view table {
+    margin-top: 6px; border-collapse: collapse; font-size: 12px; width: 100%;
+  }
+  details.table-view th, details.table-view td {
+    text-align: right; padding: 3px 10px; font-variant-numeric: tabular-nums;
+    border-bottom: 1px solid var(--grid-line); color: var(--text-secondary);
+  }
+  details.table-view th { color: var(--text-muted); font-weight: 600; }
+
+  .modelnote { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+  .modelnote b { color: var(--text-secondary); font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CRT deflection yoke simulator</h1>
+  <p>Toroidal deflection-coil geometry &rarr; Biot&ndash;Savart field &rarr; relativistic electron trajectory. Drag the 3D view to rotate; hover the field map and chart for values.</p>
+</header>
+
+<div class="layout">
+  <aside class="card controls">
+    <h2>Parameters</h2>
+    <div class="group">
+      <div class="gtitle">Drive</div>
+      <div class="ctl" data-key="current" data-min="-1.0" data-max="1.0" data-step="0.02" data-unit=" A" data-dec="2">
+        <label>Coil current <output></output></label><input type="range">
+      </div>
+      <div class="ctl" data-key="loops" data-min="1" data-max="8" data-step="1" data-unit=" loops" data-dec="0">
+        <label>Loops per coil <output></output></label><input type="range">
+      </div>
+      <div class="ctl" data-key="anodeKV" data-min="1" data-max="30" data-step="0.5" data-unit=" kV" data-dec="1">
+        <label>Anode voltage <output></output></label><input type="range">
+      </div>
+      <div class="ctl" data-key="coreMuR" data-min="1000" data-max="2500" data-step="10" data-dec="0">
+        <label><span>Core permeability &mu;<sub>r</sub></span><output></output></label><input type="range">
+      </div>
+    </div>
+    <div class="group">
+      <div class="gtitle">Yoke geometry</div>
+      <div class="ctl" data-key="minorRadius" data-min="0.010" data-max="0.045" data-step="0.001" data-unit=" mm" data-scale="1000" data-dec="0">
+        <label>Core bore radius (gun end) <output></output></label><input type="range">
+      </div>
+      <div class="ctl" data-key="majorRadius" data-min="0.030" data-max="0.100" data-step="0.001" data-unit=" mm" data-scale="1000" data-dec="0">
+        <label>Core bore radius (flare end) <output></output></label><input type="range">
+      </div>
+      <div class="ctl" data-key="coreThickness" data-min="0.002" data-max="0.020" data-step="0.001" data-unit=" mm" data-scale="1000" data-dec="0">
+        <label>Core radial thickness <output></output></label><input type="range">
+      </div>
+      <div class="ctl" data-key="yokeLength" data-min="0.030" data-max="0.150" data-step="0.002" data-unit=" mm" data-scale="1000" data-dec="0">
+        <label>Yoke length <output></output></label><input type="range">
+      </div>
+      <div class="ctl" data-key="firstAngle" data-min="5" data-max="80" data-step="1" data-unit="&deg;" data-dec="0">
+        <label>First wire angle <output></output></label><input type="range">
+      </div>
+      <div class="ctl" data-key="lastAngle" data-min="10" data-max="89" data-step="1" data-unit="&deg;" data-dec="0">
+        <label>Last wire angle <output></output></label><input type="range">
+      </div>
+    </div>
+    <div class="group">
+      <div class="gtitle">Tube</div>
+      <div class="ctl" data-key="screenZ" data-min="0.100" data-max="0.400" data-step="0.005" data-unit=" mm" data-scale="1000" data-dec="0">
+        <label>Screen distance <output></output></label><input type="range">
+      </div>
+    </div>
+    <div class="amp-turns">Total drive <b id="ampturns"></b></div>
+    <button class="reset" id="reset">Reset to defaults</button>
+  </aside>
+
+  <main class="content">
+    <div class="tiles">
+      <div class="card tile"><div class="tlabel">Screen deflection</div><div class="tvalue" id="t-defl"></div><div class="tsub" id="t-defl-in"></div></div>
+      <div class="card tile"><div class="tlabel">Deflection angle</div><div class="tvalue" id="t-angle"></div><div class="tsub">exit angle at yoke</div></div>
+      <div class="card tile"><div class="tlabel">Peak field on axis</div><div class="tvalue" id="t-bmax"></div><div class="tsub">|B<sub>x</sub>| along beam</div></div>
+      <div class="card tile"><div class="tlabel">Beam velocity</div><div class="tvalue" id="t-vel"></div><div class="tsub" id="t-vel-sub"></div></div>
+      <div class="card tile"><div class="tlabel">Sensitivity</div><div class="tvalue" id="t-sens"></div><div class="tsub">at current drive</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Side view &mdash; B<sub>x</sub> on the beam plane (x = 0) and electron trajectory</h2>
+      <div class="canvas-wrap">
+        <canvas id="side-canvas"></canvas>
+        <div class="tooltip" id="side-tip"></div>
+      </div>
+      <div class="legend" id="side-legend"></div>
+    </div>
+
+    <div class="duo">
+      <div class="card">
+        <h2>Yoke geometry &mdash; drag to rotate</h2>
+        <div class="canvas-wrap"><canvas id="geo-canvas"></canvas></div>
+        <div class="legend" id="geo-legend"></div>
+      </div>
+      <div class="card">
+        <h2>Deflection vs coil current</h2>
+        <div class="canvas-wrap">
+          <canvas id="chart-canvas"></canvas>
+          <div class="tooltip" id="chart-tip"></div>
+        </div>
+        <details class="table-view"><summary>Data table</summary>
+          <table><thead><tr><th>Current (A)</th><th>Deflection (mm)</th><th>Angle (&deg;)</th></tr></thead><tbody id="sweep-tbody"></tbody></table>
+        </details>
+      </div>
+    </div>
+
+    <div class="card modelnote">
+      <b>Model.</b> Each of the two coils is wound toroidally on a ferrite ring core: every turn is a
+      closed loop confined to one angular position &mdash; an inner leg along the core's bore (tracking
+      the tube's own taper from gun end to flare end), a radial crossover over the core's screen-end
+      face, the outer leg back along the core's outside, and a radial crossover over the gun-end face
+      closing the loop. B is the exact Biot&ndash;Savart field of these straight segments, evaluated at
+      every step of the trajectory, then scaled by the core's relative permeability &mu;<sub>r</sub> (1000&ndash;2500,
+      typical of MnZn ferrite) &mdash; a uniform multiplier with no saturation, gap reluctance, or
+      eddy-current effects modeled. The electron enters at full anode energy
+      (relativistic &gamma; from the accelerating voltage) and drifts through the yoke; the integrator is a
+      relativistic Boris rotation, which conserves speed exactly in a pure magnetic field. Deflection is
+      toward &minus;y for the wound current sense; magnitudes are what matter here.
+    </div>
+  </main>
+</div>
+
+<script src="physics.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
