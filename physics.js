@@ -9,15 +9,32 @@
  * outer radius, the outer leg back (screen end -> gun end), and a radial
  * crossover at z = 0 closing the loop. Turns are placed at angles from
  * firstAngle to lastAngle, mirrored to -firstAngle..-lastAngle with reversed
- * current so the coil is symmetric above and below the tube axis (as in a
- * real winding, which has turns both above and below driven to add rather
- * than cancel); the left coil is the further mirror image through the x = 0
- * plane, with currents chosen so Bx adds on axis.
- * Field is exact Biot-Savart of straight segments (closed form per segment),
- * scaled by coreMuR — a uniform relative-permeability multiplier standing in
- * for the ferrite core (no saturation, gap reluctance, or eddy currents
- * modeled). Electron enters the yoke at full anode energy and drifts — pure
- * magnetic force, relativistic Boris rotation (|v| conserved exactly).
+ * current so the coil is symmetric above and below the tube axis; the left
+ * coil is the further mirror image through the x = 0 plane, with currents
+ * chosen so Bx adds on axis.
+ *
+ * Field: the SCREENED-TOROID limit of the ferrite core. With mu_r >> 1 the
+ * ring is a low-reluctance return path that decouples the outer legs and the
+ * radial crossovers from the bore — their flux closes through the ferrite and
+ * never reaches the beam. The bore therefore sees only (a) the exact
+ * Biot-Savart field of the inner legs and (b) their magnetic images in the
+ * core's inner surface. The legs lie ON that surface, so each image coincides
+ * with its conductor with strength kappa = (mu_r-1)/(mu_r+1): bore field =
+ * (1 + kappa) * B_innerLegs, i.e. very nearly doubled for any real ferrite.
+ * This is a boundary-value treatment (in its high-permeability limit), not a
+ * scalar boost: it yields the nearly uniform transverse bore field a
+ * deflection yoke is designed for, and for WG6100 vertical-coil parameters
+ * (46 turns/quadrant, 5.5 A, 40 mm, 19.5 kV) it lands within ~10% of the
+ * integral B.dl needed for full-scale deflection with no free parameters.
+ * Saturation: the bore flux returns through the ring cross-section crowded by
+ * roughly rBore/coreThickness, so the core flux density is estimated as
+ * crowd * (1+kappa) * |B_innerLegs| and kappa is derated by the standard
+ * tanh knee against coreBSat. At real operating points the core runs far
+ * below saturation, so this matters only when driven hard. No hysteresis,
+ * gap reluctance, or eddy currents modeled.
+ *
+ * Electron enters the yoke at full anode energy and drifts — pure magnetic
+ * force, relativistic Boris rotation (|v| conserved exactly).
  */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory();
@@ -30,26 +47,34 @@
   const ME = 9.1093837015e-31;
   const C = 2.99792458e8;
 
+  // Defaults are the Wells-Gardner 6100 vertical-coil operating point:
+  // 46 turns/quadrant, ~5.5 A full-scale, 40 mm yoke, 19.5 kV anode.
   const defaults = {
-    current: 0.5,        // A
-    loops: 2,            // turn positions per coil (few turns => amp-scale drive at this mu_r/geometry)
+    current: 5.5,        // A, full-scale vertical drive
+    loops: 46,           // turns per quadrant
     minorRadius: 0.030,  // m, core bore radius at gun end (z = 0)
-    majorRadius: 0.0635, // m, core bore radius at screen end (z = yokeLength)
+    majorRadius: 0.0545, // m, core bore radius at screen end (z = yokeLength)
     coreThickness: 0.008,// m, radial thickness of the ferrite ring core
-    yokeLength: 0.070,   // m
+    yokeLength: 0.040,   // m
     firstAngle: 25,      // deg from x-axis
     lastAngle: 80,       // deg
     anodeKV: 19.5,       // beam energy entering the yoke, keV equivalent
-    screenZ: 0.198,      // m, measured from yoke entrance; 19" diagonal corner throw
+    screenZ: 0.198,      // m, measured from yoke entrance; 19" 4:3 half-height ~145 mm
     gunZ: -0.020,        // m, integration start
-    coreMuR: 1750,       // relative permeability of the ferrite core (typical MnZn range ~1000-2500)
+    coreMuR: 1000,       // small-signal relative permeability of the ferrite core (typical MnZn range ~1000-2500)
+    coreBSat: 0.40,      // T, saturation flux density (typical MnZn power ferrite ~0.35-0.5 T)
   };
 
   // ---- geometry -----------------------------------------------------------
   // Segment soup: flat arrays. Right coil only; the x-mirror is applied
   // analytically inside the field functions (exact, halves the work).
+  // `flat` holds every segment of every closed turn (drawing, diagnostics);
+  // `flatInner` holds only the bore legs — in the screened-toroid limit the
+  // outer legs and crossovers are shunted by the core and contribute nothing
+  // to the bore field, so the field functions iterate flatInner alone.
   function buildGeometry(p) {
     const segs = []; // {ax..bz, amp} straight segments, right coil, amp = signed current
+    const innerSegs = []; // bore legs only (the screened-toroid field sources)
     const loopsOut = []; // per-turn polyline (right coil) for drawing
     const n = Math.max(1, p.loops | 0);
     const a0 = (p.firstAngle * Math.PI) / 180;
@@ -77,11 +102,13 @@
         [rOut(0) * ct, rOut(0) * st, 0],
       ];
       for (let k = 0; k + 1 < pts.length; k++) {
-        segs.push({
+        const seg = {
           ax: pts[k][0], ay: pts[k][1], az: pts[k][2],
           bx: pts[k + 1][0], by: pts[k + 1][1], bz: pts[k + 1][2],
           amp: a,
-        });
+        };
+        segs.push(seg);
+        if (k === 0) innerSegs.push(seg); // bore leg, gun -> screen
       }
       // closing segment back to the start
       segs.push({
@@ -98,24 +125,48 @@
       addTurn(th, 1);
       addTurn(-th, -1);
     }
-    // Pack into a typed array for the hot loop: ax ay az bx by bz amp
-    const flat = new Float64Array(segs.length * 7);
-    for (let i = 0; i < segs.length; i++) {
-      const s = segs[i], o = i * 7;
-      flat[o] = s.ax; flat[o + 1] = s.ay; flat[o + 2] = s.az;
-      flat[o + 3] = s.bx; flat[o + 4] = s.by; flat[o + 5] = s.bz;
-      flat[o + 6] = s.amp;
+    // Pack into typed arrays for the hot loop: ax ay az bx by bz amp
+    function pack(list) {
+      const f = new Float64Array(list.length * 7);
+      for (let i = 0; i < list.length; i++) {
+        const s = list[i], o = i * 7;
+        f[o] = s.ax; f[o + 1] = s.ay; f[o + 2] = s.az;
+        f[o + 3] = s.bx; f[o + 4] = s.by; f[o + 5] = s.bz;
+        f[o + 6] = s.amp;
+      }
+      return f;
     }
-    return { flat, nSegs: segs.length, loops: loopsOut, params: Object.assign({}, p) };
+    // Core response: image strength kappa, and the flux-crowding ratio used
+    // to estimate core flux density from bore field for the saturation knee
+    // (bore return flux ~ B*2*rBore*L squeezed into 2 * thickness * L of ring).
+    const kappa = (p.coreMuR - 1) / (p.coreMuR + 1);
+    const crowd = ((p.minorRadius + p.majorRadius) / 2) / p.coreThickness;
+    return {
+      flat: pack(segs), nSegs: segs.length,
+      flatInner: pack(innerSegs), nInner: innerSegs.length,
+      kappa, crowd,
+      loops: loopsOut, params: Object.assign({}, p),
+    };
   }
 
   // Closed-form B of a straight segment a->b carrying current I, at point p:
   // B = (mu0 I / 4pi) * (ab.r1hat - ab.r2hat) * (ab x r1) / |ab x r1|^2
   const KB = MU0 / (4 * Math.PI);
 
+  // Screened-toroid core response: bore field = (1 + kappa_eff) * B_innerLegs,
+  // where kappa_eff is the image strength derated by the tanh saturation knee
+  // on the estimated core flux density (crowd * linear bore field).
+  function coreFactor(geo, bMag) {
+    const bCore = geo.crowd * (1 + geo.kappa) * bMag;
+    const sat = bCore > 1e-15
+      ? (geo.params.coreBSat * Math.tanh(bCore / geo.params.coreBSat)) / bCore
+      : 1;
+    return 1 + geo.kappa * sat;
+  }
+
   // Full 3-component field of the complete yoke (both coils) at (px,py,pz).
   function fieldB(geo, px, py, pz, out) {
-    const f = geo.flat, n = geo.nSegs;
+    const f = geo.flatInner, n = geo.nInner;
     let bx = 0, by = 0, bz = 0;
     // mirror = right coil evaluated at (-px, py, pz); a pseudovector reflected
     // through x=0 maps (Bx,By,Bz) -> (Bx,-By,-Bz).
@@ -144,8 +195,12 @@
         bz += sy * k * cz;
       }
     }
-    const muR = geo.params.coreMuR;
-    out.x = bx * muR; out.y = by * muR; out.z = bz * muR;
+    // (bx,by,bz) is the inner-leg Biot-Savart field; images in the core's
+    // inner surface scale it by (1 + kappa_eff).
+    const cf = coreFactor(geo, Math.sqrt(bx * bx + by * by + bz * bz));
+    out.x = bx * cf;
+    out.y = by * cf;
+    out.z = bz * cf;
     return out;
   }
 
@@ -178,7 +233,7 @@
   // Bx only, for points on the x=0 plane (where By=Bz=0 by symmetry).
   // Right coil evaluated once, doubled.
   function fieldBxOnPlane(geo, py, pz) {
-    const f = geo.flat, n = geo.nSegs;
+    const f = geo.flatInner, n = geo.nInner;
     let bx = 0;
     for (let i = 0; i < n; i++) {
       const o = i * 7;
@@ -199,7 +254,8 @@
          (abx * r2x + aby * r2y + abz * r2z) / r2m)) / c2;
       bx += k * cx;
     }
-    return 2 * bx * geo.params.coreMuR;
+    const bInner = 2 * bx; // x-mirror doubles Bx on this plane
+    return bInner * coreFactor(geo, Math.abs(bInner));
   }
 
   // ---- beam ---------------------------------------------------------------
@@ -268,7 +324,7 @@
 
   return {
     MU0, QE, ME, C, defaults,
-    buildGeometry, fieldB, fieldBxOnPlane, rawSegmentsB,
+    buildGeometry, fieldB, fieldBxOnPlane, rawSegmentsB, coreFactor,
     beamKinematics, traceTrajectory, sweepCurrent,
   };
 });

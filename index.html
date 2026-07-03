@@ -161,17 +161,20 @@
     <h2>Parameters</h2>
     <div class="group">
       <div class="gtitle">Drive</div>
-      <div class="ctl" data-key="current" data-min="-1.0" data-max="1.0" data-step="0.02" data-unit=" A" data-dec="2">
-        <label>Coil current <output></output></label><input type="range">
+      <div class="ctl" data-key="current" data-min="-6.0" data-max="6.0" data-step="0.05" data-unit=" A" data-dec="2">
+        <label>Coil current (total, driver) <output></output></label><input type="range">
       </div>
-      <div class="ctl" data-key="loops" data-min="1" data-max="8" data-step="1" data-unit=" loops" data-dec="0">
-        <label>Loops per coil <output></output></label><input type="range">
+      <div class="ctl" data-key="loops" data-min="1" data-max="60" data-step="1" data-unit=" turns" data-dec="0">
+        <label>Turns per quadrant <output></output></label><input type="range">
       </div>
       <div class="ctl" data-key="anodeKV" data-min="1" data-max="30" data-step="0.5" data-unit=" kV" data-dec="1">
         <label>Anode voltage <output></output></label><input type="range">
       </div>
-      <div class="ctl" data-key="coreMuR" data-min="1000" data-max="2500" data-step="10" data-dec="0">
+      <div class="ctl" data-key="coreMuR" data-min="1" data-max="2500" data-step="10" data-dec="0">
         <label><span>Core permeability &mu;<sub>r</sub></span><output></output></label><input type="range">
+      </div>
+      <div class="ctl" data-key="coreBSat" data-min="0.20" data-max="0.60" data-step="0.01" data-unit=" T" data-dec="2">
+        <label>Core saturation B<sub>sat</sub> <output></output></label><input type="range">
       </div>
     </div>
     <div class="group">
@@ -201,7 +204,14 @@
         <label>Screen distance <output></output></label><input type="range">
       </div>
     </div>
-    <div class="amp-turns">Total drive <b id="ampturns"></b></div>
+    <div class="amp-turns">
+      <div>Driver current (total) <b id="i-driver"></b></div>
+      <div>Current per quadrant coil <b id="i-quad"></b></div>
+      <div>Current per turn (loop) <b id="i-loop"></b></div>
+      <div>Amp&ndash;turns per quadrant <b id="ampturns"></b></div>
+      <div class="tsub" style="margin-top:6px;">The four quadrants and every turn within them are wound as one
+        continuous series loop off a single driver, so all three currents above are equal.</div>
+    </div>
     <button class="reset" id="reset">Reset to defaults</button>
   </aside>
 
@@ -209,7 +219,7 @@
     <div class="tiles">
       <div class="card tile"><div class="tlabel">Screen deflection</div><div class="tvalue" id="t-defl"></div><div class="tsub" id="t-defl-in"></div></div>
       <div class="card tile"><div class="tlabel">Deflection angle</div><div class="tvalue" id="t-angle"></div><div class="tsub">exit angle at yoke</div></div>
-      <div class="card tile"><div class="tlabel">Peak field on axis</div><div class="tvalue" id="t-bmax"></div><div class="tsub">|B<sub>x</sub>| along beam</div></div>
+      <div class="card tile"><div class="tlabel">Peak field on axis</div><div class="tvalue" id="t-bmax"></div><div class="tsub" id="t-bmax-sub">|B<sub>x</sub>| along beam</div></div>
       <div class="card tile"><div class="tlabel">Beam velocity</div><div class="tvalue" id="t-vel"></div><div class="tsub" id="t-vel-sub"></div></div>
       <div class="card tile"><div class="tlabel">Sensitivity</div><div class="tvalue" id="t-sens"></div><div class="tsub">at current drive</div></div>
     </div>
@@ -242,17 +252,30 @@
     </div>
 
     <div class="card modelnote">
-      <b>Model.</b> Each of the two coils is wound toroidally on a ferrite ring core: every turn is a
+      <b>Model.</b> The yoke is wound toroidally on a ferrite ring core in four quadrants (top/bottom
+      &times; left/right); each quadrant's turns are joined in series to its neighbors so all four are
+      driven by the single current from one driver circuit, in directions chosen so horizontal components
+      cancel and vertical components add. Every turn is a
       closed loop confined to one angular position &mdash; an inner leg along the core's bore (tracking
       the tube's own taper from gun end to flare end), a radial crossover over the core's screen-end
       face, the outer leg back along the core's outside, and a radial crossover over the gun-end face
-      closing the loop. B is the exact Biot&ndash;Savart field of these straight segments, evaluated at
-      every step of the trajectory, then scaled by the core's relative permeability &mu;<sub>r</sub> (1000&ndash;2500,
-      typical of MnZn ferrite) &mdash; a uniform multiplier with no saturation, gap reluctance, or
-      eddy-current effects modeled. The electron enters at full anode energy
-      (relativistic &gamma; from the accelerating voltage) and drifts through the yoke; the integrator is a
-      relativistic Boris rotation, which conserves speed exactly in a pure magnetic field. Deflection is
-      toward &minus;y for the wound current sense; magnitudes are what matter here.
+      closing the loop. The field uses the <b>screened-toroid limit</b> of the ferrite: with
+      &mu;<sub>r</sub> &raquo; 1 the ring is a low-reluctance return path that decouples the outer legs and
+      crossovers from the bore &mdash; their flux closes through the ferrite and never reaches the beam.
+      The bore sees only the exact Biot&ndash;Savart field of the inner legs plus their magnetic images in
+      the core's inner surface; since the legs lie on that surface, each image coincides with its conductor
+      at strength &kappa; = (&mu;<sub>r</sub>&minus;1)/(&mu;<sub>r</sub>+1), so the bore field is
+      (1+&kappa;)&middot;B<sub>inner</sub> &mdash; very nearly doubled for any real ferrite, with no fitted
+      parameters. This boundary-value treatment produces the nearly uniform transverse bore field a
+      deflection yoke is designed for. Saturation: the bore's return flux crowds into the ring cross-section
+      (roughly r<sub>bore</sub>/thickness denser than in the bore), and &kappa; is derated by a tanh knee
+      when that estimated core flux approaches B<sub>sat</sub>; at the WG6100 operating point the core runs
+      near 10% of B<sub>sat</sub>, so the response is linear. No hysteresis, gap reluctance, or eddy-current
+      effects are modeled. The electron enters at full anode energy (relativistic &gamma; from the
+      accelerating voltage) and drifts through the yoke; the integrator is a relativistic Boris rotation,
+      which conserves speed exactly in a pure magnetic field. Deflection is toward &minus;y for the wound
+      current sense; magnitudes are what matter here. Defaults follow the Wells-Gardner 6100 vertical coil:
+      46 turns per quadrant, 5.5 A full-scale, 40 mm yoke, 19.5 kV anode.
     </div>
   </main>
 </div>

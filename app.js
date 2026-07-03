@@ -103,7 +103,7 @@
   }
 
   function computeSweep() {
-    const n = 17, maxI = 1.0;
+    const n = 17, maxI = 6.0;
     const currents = [];
     for (let i = -(n - 1); i <= n - 1; i++) currents.push((maxI * i) / (n - 1));
     sweep = P.sweepCurrent(state, currents);
@@ -128,12 +128,18 @@
     $("t-defl-in").textContent = fmt(dmm / 25.4, 2) + " in at the screen";
     $("t-angle").textContent = fmt(traj.angleDeg, 1) + "°";
     $("t-bmax").textContent = fmt(traj.maxBx * 1000, 2) + " mT";
+    const bCore = geo.crowd * Math.abs(traj.maxBx);
+    $("t-bmax-sub").textContent =
+      "|B" + "ₓ" + "| along beam · core ~" + fmt((bCore / state.coreBSat) * 100, 0) + "% of Bsat";
     $("t-vel").textContent = fmt((traj.v / P.C) * 100, 1) + "% c";
     $("t-vel-sub").textContent = (traj.v / 1e6).toFixed(1) + " Mm/s · transit " + traj.transitNs.toFixed(1) + " ns";
     $("t-sens").textContent = Math.abs(state.current) > 1e-6
       ? fmt(Math.abs(dmm) / Math.abs(state.current), 1) + " mm/A" : "—";
+    $("i-driver").textContent = state.current.toFixed(2) + " A";
+    $("i-quad").textContent = state.current.toFixed(2) + " A";
+    $("i-loop").textContent = state.current.toFixed(2) + " A";
     $("ampturns").textContent =
-      (state.loops * state.current).toFixed(2) + " A·turns per coil";
+      (state.loops * state.current).toFixed(2) + " A·turns";
   }
 
   // ---- side view ------------------------------------------------------------
@@ -239,6 +245,7 @@
     ctx.textAlign = "left"; ctx.fillText("−" + bmT, cbX, cbY + cbH + 12);
     ctx.textAlign = "center"; ctx.fillText("0", cbX + cbW / 2, cbY + cbH + 12);
     ctx.textAlign = "right"; ctx.fillText("+" + bmT + " mT", cbX + cbW, cbY + cbH + 12);
+    ctx.fillText("signed Bx component", cbX + cbW, cbY + cbH + 25);
     ctx.textAlign = "left";
   }
 
@@ -407,10 +414,10 @@
     const zeroX = Math.round(xp(0)) + 0.5;
     ctx.beginPath(); ctx.moveTo(zeroX, mT); ctx.lineTo(zeroX, mT + ph); ctx.stroke();
     ctx.textAlign = "center";
-    const AStep = 0.2;
+    const AStep = 1.0;
     for (let I = 0; I <= maxI + 1e-9; I += AStep) {
-      ctx.fillText(I.toFixed(1), xp(I), h - 12);
-      if (I > 0) ctx.fillText((-I).toFixed(1), xp(-I), h - 12);
+      ctx.fillText(I.toFixed(0), xp(I), h - 12);
+      if (I > 0) ctx.fillText((-I).toFixed(0), xp(-I), h - 12);
     }
     ctx.fillText("coil current (A)", mL + pw / 2, h - 0.5);
     ctx.save();
